@@ -29,6 +29,12 @@ build/
 
 # Logs
 *.log
+logs/
+
+# Runtime
+pids/
+*.pid
+producer.state
 
 # OS
 .DS_Store
