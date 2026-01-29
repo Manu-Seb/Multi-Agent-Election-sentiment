@@ -5,3 +5,5 @@ pydantic
 pydantic-settings
 python-dotenv
 beautifulsoup4
+confluent-kafka
+confluent-kafka
