@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 import sys
 import os
 
@@ -36,6 +36,19 @@ MOCK_TTRSS_RESPONSE = [
         "author": None
     }
 ]
+
+
+@pytest.fixture(autouse=True)
+def mock_content_fetcher():
+    """
+    Prevent real HTTP calls to article URLs in all API tests.
+    Returns the original TT-RSS excerpt (second arg) unchanged.
+    """
+    with patch(
+        "services.content_fetcher.fetch_full_content",
+        side_effect=lambda url, fallback="": fallback
+    ):
+        yield
 
 @patch("services.ttrss.TTRSSClient.get_headlines", new_callable=AsyncMock)
 def test_get_articles_success(mock_get_headlines):

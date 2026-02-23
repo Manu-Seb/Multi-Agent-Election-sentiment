@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime, timezone
+import asyncio
 import logging
 
 from config import settings
@@ -62,14 +63,13 @@ async def get_articles(
                 
             filtered_items.append(item)
             
-        # 3. Normalization
+        # 3. Normalization — run all article fetches concurrently
         # If Q is provided, use it as tag. If not, empty tags.
         tags = [q] if q else []
-        
-        normalized_response = [
-            normalize_article(item, query_tags=tags) 
-            for item in filtered_items
-        ]
+
+        normalized_response = list(await asyncio.gather(
+            *[normalize_article(item, query_tags=tags) for item in filtered_items]
+        ))
         
         return normalized_response
 

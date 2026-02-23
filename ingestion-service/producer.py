@@ -12,11 +12,12 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 # Third-party dependencies
-# pip install confluent-kafka pydantic httpx
+# pip install confluent-kafka pydantic httpx trafilatura
 import httpx
 from confluent_kafka import Producer
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from services.content_fetcher import fetch_full_content
 
 # Load environment variables from .env file
 load_dotenv(override=True)
@@ -44,6 +45,7 @@ class Article(BaseModel):
     published_at: datetime  # ISO-8601 UTC
     author: Optional[str]
     tags: List[str]
+    source: str  # Ingestion source identifier (e.g., "ttrss", "rss", "api")
 
     class Config:
         json_encoders = {
@@ -97,30 +99,30 @@ def fetch_articles(sid: str) -> List[Dict[str, Any]]:
         raise e
 
 def normalize_article(raw: Dict[str, Any]) -> Article:
-    """Strict normalization to Article schema."""
+    """Strict normalization to Article schema.
+    
+    Fetches the full article body from the article URL using trafilatura.
+    Falls back to the TT-RSS RSS excerpt if the fetch fails.
+    """
     # TT-RSS timestamp is unix int
     ts = raw.get("updated", 0)
     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    
-    # "Message key must be derived from the article’s region... If unavailable, use feed_title"
-    # We don't have explicit region in TT-RSS raw data. We check tags if we had them or just feed_title.
-    # The prompt implies region might be in the data, but usually it isn't unless we parse it.
-    # We will assume feed_title is the fallback key.
-    
-    # Note: TTRSS might return tags as comma-separated string or list? 
-    # Usually it's not well structured in standard response unless requested.
-    # We'll default to empty list if not finding obvious tags.
-    
+
+    # Fetch full article content; fall back to TT-RSS excerpt on any error
+    ttrss_excerpt = raw.get("content", "")
+    full_content = fetch_full_content(raw.get("link", ""), fallback=ttrss_excerpt)
+
     return Article(
         id=raw.get("id"),
         title=raw.get("title", ""),
-        content=raw.get("content", ""),
+        content=full_content,
         link=raw.get("link", ""),
         feed_id=raw.get("feed_id", 0),
         feed_title=raw.get("feed_title", "Unknown Feed"),
         published_at=dt,
         author=raw.get("author") or None,
-        tags=[] # Raw TTRSS getHeadlines doesn't typically output tags unless custom plugin
+        tags=[],  # Raw TTRSS getHeadlines doesn't typically output tags unless custom plugin
+        source="ttrss"  # Mark all articles from this producer as TT-RSS sourced
     )
 
 def publish(producer: Producer, article: Article):
