@@ -1,0 +1,30 @@
+services:
+  websocket-service:
+    image: python:3.9-slim
+    working_dir: /app
+    command: >
+      bash -lc "pip install --no-cache-dir -r requirements.txt &&
+      PYTHONPATH=/app/src uvicorn websocket_service.api:app --host 0.0.0.0 --port 8030"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: host.docker.internal:9092
+      GRAPH_STORAGE_POSTGRES_DSN: postgresql://graph_user:graph_pass@host.docker.internal:5433/graph_storage
+      WEBSOCKET_GROUP_ID: websocket-broadcaster
+      GRAPH_CHANGES_TOPIC: graph-changes
+      WS_REDIS_ENABLED: "true"
+      WS_REDIS_URL: redis://redis:6379/0
+      WS_INSTANCE_ID: ws-compose
+    volumes:
+      - ../../:/app
+    ports:
+      - "8030:8030"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+# Scaling note:
+# docker compose up --scale websocket-service=3 -d
+# Place behind a load balancer with sticky sessions for best UX.

@@ -26,6 +26,10 @@ class SnapshotManager:
         self.changes_since_snapshot = 0
         self.last_snapshot_time: datetime | None = None
         self.last_event_id: int | None = None
+        self._publisher = None
+
+    def set_snapshot_publisher(self, publisher) -> None:
+        self._publisher = publisher
 
     def on_change_event(self, event_id: int, event_time: datetime, changes: dict[str, Any]) -> None:
         self.current_state = apply_change_event(self.current_state, changes)
@@ -56,6 +60,8 @@ class SnapshotManager:
             last_event_id=self.last_event_id,
             graph_state=self.current_state,
         )
+        if self._publisher is not None:
+            self._publisher(snapshot_time=snapshot_time, last_event_id=self.last_event_id, graph_state=self.current_state)
         self.last_snapshot_time = snapshot_time
         self.changes_since_snapshot = 0
         self.repo.prune_snapshots(self.retention_days)

@@ -6,7 +6,7 @@ import os
 import threading
 from datetime import datetime, timezone
 
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, Producer
 
 from .config import StorageConfig
 from .db import StorageRepository
@@ -31,7 +31,9 @@ class StorageConsumerWorker:
                 "enable.auto.commit": False,
             }
         )
+        self._producer = Producer({"bootstrap.servers": cfg.kafka_bootstrap_servers})
         self._batch_size = int(os.getenv("GRAPH_STORAGE_BATCH_SIZE", "32"))
+        self._snapshot_mgr.set_snapshot_publisher(self._publish_snapshot)
 
     @staticmethod
     def _event_time_from_ms(value: int) -> datetime:
@@ -48,6 +50,8 @@ class StorageConsumerWorker:
         STORED_CHANGE_EVENTS.inc()
 
     def _handle_snapshot_message(self, payload: dict) -> None:
+        if payload.get("source_instance") == self._cfg.storage_instance_id:
+            return
         snapshot_time = self._event_time_from_ms(int(payload["timestamp"]))
         graph_state = payload.get("graph_state", {})
         last_event_id = payload.get("last_event_id")
@@ -56,6 +60,20 @@ class StorageConsumerWorker:
             last_event_id=int(last_event_id) if last_event_id is not None else None,
             graph_state=graph_state,
         )
+
+    def _publish_snapshot(self, *, snapshot_time: datetime, last_event_id: int | None, graph_state: dict) -> None:
+        payload = {
+            "timestamp": int(snapshot_time.timestamp() * 1000),
+            "last_event_id": last_event_id,
+            "graph_state": graph_state,
+            "source_instance": self._cfg.storage_instance_id,
+        }
+        self._producer.produce(
+            topic=self._cfg.snapshots_topic,
+            key=(str(last_event_id) if last_event_id is not None else "none").encode("utf-8"),
+            value=json.dumps(payload).encode("utf-8"),
+        )
+        self._producer.poll(0)
 
     def _run(self) -> None:
         self._consumer.subscribe([self._cfg.changes_topic, self._cfg.snapshots_topic])
@@ -88,6 +106,7 @@ class StorageConsumerWorker:
                     self._logger.exception("failed to store message from topic=%s", msg.topic())
 
         self._consumer.close()
+        self._producer.flush(5)
         self._logger.info("storage consumer stopped")
 
     def start(self) -> None:

@@ -19,8 +19,9 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from services.content_fetcher import fetch_full_content
 
-# Load environment variables from .env file
-load_dotenv(override=True)
+# Load environment variables from .env file, but do not override
+# values injected by Docker/Compose.
+load_dotenv(override=False)
 
 # --- Configuration ---
 TTRSS_URL = os.getenv("TTRSS_URL", "http://localhost/tt-rss/api/")

@@ -141,5 +141,21 @@ class StorageRepository:
             )
         return [dict(row) for row in rows or []]
 
+    def fetch_changes_after_id(self, last_event_id: int, limit: int = 1000) -> list[dict[str, Any]]:
+        rows = retry(
+            lambda: self._run(
+                """
+                SELECT id, event_time, article_id, changes
+                FROM graph_change_events
+                WHERE id > %s
+                ORDER BY id ASC
+                LIMIT %s
+                """,
+                (last_event_id, limit),
+                fetch="all",
+            )
+        )
+        return [dict(row) for row in rows or []]
+
     def close(self) -> None:
         self._pool.closeall()

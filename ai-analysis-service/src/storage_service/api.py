@@ -46,6 +46,11 @@ def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return {"ok": True}
+
+
 @app.get("/state")
 def get_state(time: str = Query(..., description="ISO-8601 timestamp")) -> dict[str, Any]:
     started = time.perf_counter()

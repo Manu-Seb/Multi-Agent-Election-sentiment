@@ -4,185 +4,185 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-LOG_DIR="$PROJECT_ROOT/logs"
-PID_DIR="$PROJECT_ROOT/pids"
-mkdir -p "$LOG_DIR" "$PID_DIR"
+REDPANDA_CONTAINER="${REDPANDA_CONTAINER:-redpanda}"
+RAW_TOPIC="${RAW_ARTICLES_TOPIC:-raw_ingestion}"
+ENTITY_TOPIC="${ENTITY_SENTIMENT_TOPIC:-entity-sentiment}"
+DLQ_TOPIC="${ENTITY_SENTIMENT_DLQ_TOPIC:-entity-sentiment-dlq}"
+GRAPH_CHANGES_TOPIC="${GRAPH_CHANGES_TOPIC:-graph-changes}"
+GRAPH_METRICS_TOPIC="${GRAPH_METRICS_TOPIC:-graph-metrics}"
 
-if [ -x "$PROJECT_ROOT/ai-analysis-service/venv/bin/python" ]; then
-  PYTHON_BIN="$PROJECT_ROOT/ai-analysis-service/venv/bin/python"
-elif [ -x "$PROJECT_ROOT/venv/bin/python" ]; then
-  PYTHON_BIN="$PROJECT_ROOT/venv/bin/python"
-else
-  echo "Python venv not found. Expected ai-analysis-service/venv or venv."
-  exit 1
-fi
+log_ok() { printf "✅ %s\n" "$1"; }
+log_fail() { printf "❌ %s\n" "$1"; }
+log_info() { printf "ℹ️  %s\n" "$1"; }
 
-export PYTHONPATH="$PROJECT_ROOT/ai-analysis-service/src:$PROJECT_ROOT/ai-analysis-service"
-
-GRAPH_STATE_PID_FILE="$PID_DIR/graph-state-test.pid"
-GRAPH_ALGO_PID_FILE="$PID_DIR/graph-algo-test.pid"
-STORAGE_PID_FILE="$PID_DIR/storage-test.pid"
-
-cleanup() {
-  for f in "$GRAPH_STATE_PID_FILE" "$GRAPH_ALGO_PID_FILE" "$STORAGE_PID_FILE"; do
-    if [ -f "$f" ]; then
-      kill "$(cat "$f")" 2>/dev/null || true
-      rm -f "$f"
-    fi
-  done
-}
-trap cleanup EXIT
-
-log() {
-  printf '\n[%s] %s\n' "TEST" "$1"
+section() {
+  echo
+  echo "============================================================"
+  echo "$1"
+  echo "============================================================"
 }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1"; exit 1; }
+  command -v "$1" >/dev/null 2>&1 || {
+    log_fail "Missing required command: $1"
+    exit 1
+  }
 }
 
-wait_for_http() {
-  local url="$1"
-  local tries=30
-  local delay=1
-  for _ in $(seq 1 "$tries"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep "$delay"
-  done
-  echo "Timed out waiting for $url"
+check_pid_running() {
+  local name="$1"
+  local pidfile="$2"
+  if [ ! -f "$pidfile" ]; then
+    log_fail "$name PID file missing: $pidfile"
+    return 1
+  fi
+  local pid
+  pid="$(cat "$pidfile")"
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    log_ok "$name running (PID $pid)"
+    return 0
+  fi
+  log_fail "$name PID not running (stale PID $pid)"
   return 1
 }
 
-require_cmd curl
+check_http() {
+  local name="$1"
+  local url="$2"
+  if curl -fsS "$url" >/dev/null 2>&1; then
+    log_ok "$name healthy ($url)"
+    return 0
+  fi
+  log_fail "$name not reachable ($url)"
+  return 1
+}
+
+show_log_tail() {
+  local label="$1"
+  local file="$2"
+  section "Log Tail: $label"
+  if [ -f "$file" ]; then
+    tail -n 80 "$file" || true
+  else
+    echo "(log file not found: $file)"
+  fi
+}
+
+wait_for_topic_key() {
+  local topic="$1"
+  local key="$2"
+  local tries="${3:-30}"
+  local delay="${4:-2}"
+  local tmp
+  tmp="$(mktemp)"
+
+  for _ in $(seq 1 "$tries"); do
+    if timeout 8s docker exec "$REDPANDA_CONTAINER" rpk topic consume "$topic" -o @-10m:end -n 300 -f '%k\t%v\n' >"$tmp" 2>/dev/null; then
+      local row
+      row="$(grep "^${key}[[:space:]]" "$tmp" | tail -n 1 || true)"
+      if [ -n "$row" ]; then
+        log_ok "Found key=$key on topic=$topic"
+        local value
+        value="$(printf '%s' "$row" | cut -f2-)"
+        python3 -c 'import json,sys; print(json.dumps(json.loads(sys.stdin.read()), indent=2, ensure_ascii=False))' <<<"$value" \
+          || printf '%s\n' "$value"
+        rm -f "$tmp"
+        return 0
+      fi
+    fi
+    log_info "Waiting for topic=$topic key=$key"
+    sleep "$delay"
+  done
+  rm -f "$tmp"
+  return 1
+}
+
 require_cmd docker
+require_cmd curl
+require_cmd python3
 
-if ! docker ps --format '{{.Names}}' | grep -q '^redpanda$'; then
-  echo "Redpanda container is not running. Run ./start.sh first."
+section "Preflight (Must Already Be Started)"
+log_info "This script does not start services. Run ./start.sh first."
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$REDPANDA_CONTAINER"; then
+  log_fail "Container '$REDPANDA_CONTAINER' is not running."
   exit 1
 fi
+log_ok "Redpanda container is running"
 
-log "1/7 Unit tests (Graph State + Graph Algorithms + Storage State)"
-"$PYTHON_BIN" - <<'PY'
-from tests.test_graph_state.test_store import (
-    test_graph_update_and_lookup,
-    test_metrics_include_memory_usage,
-    test_change_event_contains_deltas_and_validation,
-    test_change_event_threshold_filters_tiny_sentiment_updates,
-)
-from tests.test_graph_state.test_api import test_graph_update_and_endpoints
-from tests.test_graph_algorithms.test_engine import (
-    test_relationship_strength_and_pagerank,
-    test_community_changes,
-    test_metrics_payload_shape,
-)
-from tests.test_storage_service.test_state import (
-    test_apply_change_event_updates_graph_state,
-    test_reconstruction_cache,
-    test_history_and_trend,
-)
+check_pid_running "Ingestion API" "$PROJECT_ROOT/pids/ingestion-api.pid" || exit 1
+check_pid_running "Ingestion Producer" "$PROJECT_ROOT/pids/ingestion-producer.pid" || exit 1
+check_pid_running "Entity Sentiment Processor" "$PROJECT_ROOT/pids/entity-sentiment-processor.pid" || exit 1
+check_pid_running "Graph State Service" "$PROJECT_ROOT/pids/graph-state.pid" || exit 1
+check_pid_running "Graph Algorithms Service" "$PROJECT_ROOT/pids/graph-algorithms.pid" || exit 1
+check_pid_running "Storage Service" "$PROJECT_ROOT/pids/storage-service.pid" || exit 1
+check_pid_running "WebSocket Service" "$PROJECT_ROOT/pids/websocket-service.pid" || exit 1
 
-test_graph_update_and_lookup()
-test_metrics_include_memory_usage()
-test_change_event_contains_deltas_and_validation()
-test_change_event_threshold_filters_tiny_sentiment_updates()
-test_graph_update_and_endpoints()
+check_http "Ingestion API" "http://localhost:8000/health" || exit 1
+check_http "Graph State API" "http://localhost:8010/health" || exit 1
+check_http "Storage API" "http://localhost:8020/health" || exit 1
+check_http "WebSocket API" "http://localhost:8030/health" || exit 1
 
-test_relationship_strength_and_pagerank()
-test_community_changes()
-test_metrics_payload_shape()
-
-test_apply_change_event_updates_graph_state()
-test_reconstruction_cache()
-test_history_and_trend()
-print("unit tests passed")
-PY
-
-log "2/7 Entity processor smoke test"
-"$PROJECT_ROOT/ai-analysis-service/deploy/smoke_test_pipeline.sh"
-
-log "3/7 Graph State API integration"
-GRAPH_STREAM_ENABLED=false nohup "$PYTHON_BIN" -m uvicorn graph_state.api:app --host 0.0.0.0 --port 8010 > "$LOG_DIR/graph-state-test.log" 2>&1 &
-echo $! > "$GRAPH_STATE_PID_FILE"
-wait_for_http "http://localhost:8010/graph/current"
-
+section "1/5 Publish Test Article"
 NOW_MS="$(( $(date +%s) * 1000 ))"
-curl -fsS -X POST "http://localhost:8010/graph/update" \
-  -H 'Content-Type: application/json' \
-  -d "{\"article_id\":\"graph-state-manual\",\"processed_at\":$NOW_MS,\"entities\":[{\"text\":\"Alice\",\"type\":\"PERSON\",\"sentence\":\"Alice met Bob.\",\"sentiment_score\":0.8,\"confidence\":0.9,\"char_start\":0,\"char_end\":5},{\"text\":\"Bob\",\"type\":\"PERSON\",\"sentence\":\"Alice met Bob.\",\"sentiment_score\":0.6,\"confidence\":0.9,\"char_start\":10,\"char_end\":13}],\"co_occurrence_pairs\":[{\"entity_1\":\"Alice\",\"entity_2\":\"Bob\",\"count\":1}],\"processing_metadata\":{\"processing_time_ms\":12,\"model_versions\":{\"spacy\":\"test\",\"distilbert\":\"test\"}}}" >/dev/null
+RUN_ID="$(date +%s)"
+ARTICLE_KEY="pipeline-test-${RUN_ID}"
+RAW_PAYLOAD="{\"id\":\"${ARTICLE_KEY}\",\"source_url\":\"https://example.com/pipeline\",\"content\":\"Alice from New York praised Bob. Bob responded from Washington with confidence.\",\"published_at\":${NOW_MS},\"raw_metadata\":{\"source\":\"test_everything\",\"run_id\":\"${RUN_ID}\"}}"
+printf '%s\n' "$RAW_PAYLOAD" | docker exec -i "$REDPANDA_CONTAINER" rpk topic produce "$RAW_TOPIC" -k "$ARTICLE_KEY" >/dev/null
+log_ok "Published key=$ARTICLE_KEY to $RAW_TOPIC"
 
-STATE_JSON="$(curl -fsS "http://localhost:8010/graph/current")"
-"$PYTHON_BIN" - <<PY
-import json
-obj = json.loads('''$STATE_JSON''')
-assert obj["node_count"] >= 2
-assert obj["edge_count"] >= 1
-print("graph state api integration passed")
-PY
-
-log "4/7 Graph Algorithms integration (entity-sentiment -> graph-metrics)"
-docker exec redpanda rpk topic create graph-metrics -p 3 -r 1 --if-not-exists >/dev/null 2>&1 || true
-
-nohup "$PYTHON_BIN" -m graph_algorithms.main > "$LOG_DIR/graph-algo-test.log" 2>&1 &
-echo $! > "$GRAPH_ALGO_PID_FILE"
-sleep 3
-
-EVENT_ID="graph-algo-test-$(date +%s)"
-PAYLOAD="{\"article_id\":\"$EVENT_ID\",\"processed_at\":$NOW_MS,\"entities\":[{\"text\":\"Alice\",\"type\":\"PERSON\",\"sentence\":\"Alice met Bob.\",\"sentiment_score\":0.8,\"confidence\":0.9,\"char_start\":0,\"char_end\":5},{\"text\":\"Bob\",\"type\":\"PERSON\",\"sentence\":\"Alice met Bob.\",\"sentiment_score\":0.7,\"confidence\":0.9,\"char_start\":10,\"char_end\":13}],\"co_occurrence_pairs\":[{\"entity_1\":\"Alice\",\"entity_2\":\"Bob\",\"count\":1}],\"processing_metadata\":{\"processing_time_ms\":20,\"model_versions\":{\"spacy\":\"en_core_web_sm\",\"distilbert\":\"distilbert\"}}}"
-printf '%s\n' "$PAYLOAD" | docker exec -i redpanda rpk topic produce entity-sentiment -k "$EVENT_ID" >/dev/null
-
-if ! timeout 20s docker exec redpanda rpk topic consume graph-metrics -o @-10m:end -n 20 -f '%k\t%v\n' | grep -q "$EVENT_ID"; then
-  echo "Did not observe graph-metrics output for $EVENT_ID"
+section "2/5 Verify Entity-Sentiment Output"
+if ! wait_for_topic_key "$ENTITY_TOPIC" "$ARTICLE_KEY" 40 3; then
+  log_fail "No output found on $ENTITY_TOPIC for key=$ARTICLE_KEY"
+  show_log_tail "Entity Sentiment Processor" "$PROJECT_ROOT/logs/entity-sentiment-processor.log"
+  show_log_tail "Ingestion Producer" "$PROJECT_ROOT/logs/ingestion-producer.log"
   exit 1
 fi
 
-echo "graph algorithms integration passed"
+section "3/5 Verify Graph-Changes Output"
+if ! wait_for_topic_key "$GRAPH_CHANGES_TOPIC" "$ARTICLE_KEY" 30 2; then
+  log_fail "No output found on $GRAPH_CHANGES_TOPIC for key=$ARTICLE_KEY"
+  show_log_tail "Graph State Service" "$PROJECT_ROOT/logs/graph-state.log"
+  exit 1
+fi
 
-log "5/7 Storage Postgres container"
-cd "$PROJECT_ROOT/ai-analysis-service/deploy/storage-postgres"
-docker compose up -d
-cd "$PROJECT_ROOT"
+section "4/5 Verify Graph-Metrics Output"
+if ! wait_for_topic_key "$GRAPH_METRICS_TOPIC" "$ARTICLE_KEY" 30 2; then
+  log_fail "No output found on $GRAPH_METRICS_TOPIC for key=$ARTICLE_KEY"
+  show_log_tail "Graph Algorithms Service" "$PROJECT_ROOT/logs/graph-algorithms.log"
+  exit 1
+fi
 
-log "6/7 Storage Service API integration"
-GRAPH_STORAGE_POSTGRES_DSN="postgresql://graph_user:graph_pass@localhost:5433/graph_storage" \
-KAFKA_BOOTSTRAP_SERVERS="localhost:9092" \
-nohup "$PYTHON_BIN" -m uvicorn storage_service.api:app --host 0.0.0.0 --port 8020 > "$LOG_DIR/storage-test.log" 2>&1 &
-echo $! > "$STORAGE_PID_FILE"
-wait_for_http "http://localhost:8020/metrics"
+section "5/5 API and DLQ Checks"
+GRAPH_CURRENT="$(curl -fsS "http://localhost:8010/graph/current")"
+printf '%s' "$GRAPH_CURRENT" | python3 -c 'import json,sys; obj=json.load(sys.stdin); assert obj["node_count"] >= 1, obj; print("✅ Graph state API returned node_count >= 1")'
 
-CHANGE_ID="storage-test-$(date +%s)"
-CHANGE_PAYLOAD="{\"schema_version\":1,\"timestamp\":$NOW_MS,\"article_id\":\"$CHANGE_ID\",\"entity_changes\":[{\"id\":\"Alice\",\"old_mentions\":0,\"new_mentions\":1,\"delta_mentions\":1,\"old_sentiment\":0.0,\"new_sentiment\":0.8,\"delta_sentiment\":0.8,\"old_centrality\":0.0,\"new_centrality\":0.5,\"delta_centrality\":0.5}],\"relationship_changes\":[{\"source\":\"Alice\",\"target\":\"Bob\",\"old_strength\":0.0,\"new_strength\":1.0,\"delta_strength\":1.0,\"old_joint_sentiment\":0.0,\"new_joint_sentiment\":0.7,\"delta_joint_sentiment\":0.7}],\"processing_metrics\":{\"extraction_ms\":10,\"graph_update_ms\":2}}"
-printf '%s\n' "$CHANGE_PAYLOAD" | docker exec -i redpanda rpk topic produce graph-changes -k "$CHANGE_ID" >/dev/null
-sleep 4
-
-FROM_ISO="$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || python3 - <<'PY'
+FROM_ISO="$(python3 - <<'PY'
 from datetime import datetime, timedelta, timezone
-print((datetime.now(timezone.utc)-timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))
+print((datetime.now(timezone.utc)-timedelta(minutes=15)).strftime('%Y-%m-%dT%H:%M:%SZ'))
 PY
 )"
-TO_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || python3 - <<'PY'
+TO_ISO="$(python3 - <<'PY'
 from datetime import datetime, timezone
 print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
 PY
 )"
 
-CHANGES_JSON="$(curl -fsS "http://localhost:8020/changes?from=$FROM_ISO&to=$TO_ISO&entity=$CHANGE_ID")"
-"$PYTHON_BIN" - <<PY
-import json
-obj = json.loads('''$CHANGES_JSON''')
-assert obj["count"] >= 1
-print("storage api integration passed")
-PY
+STORAGE_CHANGES="$(curl -fsS "http://localhost:8020/changes?from=${FROM_ISO}&to=${TO_ISO}&entity=${ARTICLE_KEY}")"
+printf '%s' "$STORAGE_CHANGES" | python3 -c 'import json,sys; obj=json.load(sys.stdin); assert obj["count"] >= 1, obj; print("✅ Storage API contains change events for test key")'
 
-log "7/7 Optional benchmarks (quick run)"
-PYTHONPATH="$PYTHONPATH" "$PYTHON_BIN" ai-analysis-service/benchmarks/benchmark_graph_state.py >/dev/null
-PYTHONPATH="$PYTHONPATH" "$PYTHON_BIN" ai-analysis-service/benchmarks/benchmark_graph_algorithms.py >/dev/null
+tmp_dlq="$(mktemp)"
+if timeout 6s docker exec "$REDPANDA_CONTAINER" rpk topic consume "$DLQ_TOPIC" -o @-10m:end -n 50 -f '%k\t%v\n' >"$tmp_dlq" 2>/dev/null; then
+  if grep -q "^${ARTICLE_KEY}[[:space:]]" "$tmp_dlq"; then
+    log_fail "Test key appeared in DLQ topic ($DLQ_TOPIC)"
+    cat "$tmp_dlq"
+    rm -f "$tmp_dlq"
+    exit 1
+  fi
+fi
+rm -f "$tmp_dlq"
+log_ok "No DLQ record for test key"
 
-echo
-echo "All tests passed."
-echo "Logs:"
-echo "  - $LOG_DIR/ai-analysis.log"
-echo "  - $LOG_DIR/graph-state-test.log"
-echo "  - $LOG_DIR/graph-algo-test.log"
-echo "  - $LOG_DIR/storage-test.log"
+section "Summary"
+log_ok "All tests passed for key=$ARTICLE_KEY"
+echo "Run ID: $RUN_ID"

@@ -19,6 +19,7 @@ class StorageConfig:
     schema_version: int
     reconstruction_cache_ttl_seconds: int
     reconstruction_cache_size: int
+    storage_instance_id: str
 
 
 DEFAULT_DSN = "postgresql://graph_user:graph_pass@localhost:5433/graph_storage"
@@ -39,4 +40,5 @@ def load_config() -> StorageConfig:
         schema_version=int(os.getenv("GRAPH_CHANGES_SCHEMA_VERSION", "1")),
         reconstruction_cache_ttl_seconds=int(os.getenv("GRAPH_RECON_CACHE_TTL_SECONDS", "60")),
         reconstruction_cache_size=int(os.getenv("GRAPH_RECON_CACHE_SIZE", "128")),
+        storage_instance_id=os.getenv("GRAPH_STORAGE_INSTANCE_ID", "storage-1"),
     )

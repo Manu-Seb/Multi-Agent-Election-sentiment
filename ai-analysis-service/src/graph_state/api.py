@@ -56,3 +56,9 @@ async def post_graph_update(payload: EntitySentimentResultValue) -> dict:
 @app.get("/graph/metrics")
 async def get_graph_metrics() -> dict:
     return await store.get_metrics()
+
+
+@app.get("/health")
+async def health() -> dict:
+    metrics = await store.get_metrics()
+    return {"ok": True, "node_count": metrics["node_count"], "edge_count": metrics["edge_count"]}
