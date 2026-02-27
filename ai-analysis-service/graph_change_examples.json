@@ -1,0 +1,84 @@
+{
+  "new_entities_new_edge": {
+    "schema_version": 1,
+    "timestamp": 1772201903528,
+    "article_id": "example-new",
+    "entity_changes": [
+      {
+        "id": "Alice",
+        "old_mentions": 0,
+        "new_mentions": 1,
+        "delta_mentions": 1,
+        "old_sentiment": 0.0,
+        "new_sentiment": 0.82,
+        "delta_sentiment": 0.82,
+        "old_centrality": 0.0,
+        "new_centrality": 1.0,
+        "delta_centrality": 1.0
+      },
+      {
+        "id": "Bob",
+        "old_mentions": 0,
+        "new_mentions": 1,
+        "delta_mentions": 1,
+        "old_sentiment": 0.0,
+        "new_sentiment": 0.76,
+        "delta_sentiment": 0.76,
+        "old_centrality": 0.0,
+        "new_centrality": 1.0,
+        "delta_centrality": 1.0
+      }
+    ],
+    "relationship_changes": [
+      {
+        "source": "Alice",
+        "target": "Bob",
+        "old_strength": 0.0,
+        "new_strength": 1.0,
+        "delta_strength": 1.0,
+        "old_joint_sentiment": 0.0,
+        "new_joint_sentiment": 0.79,
+        "delta_joint_sentiment": 0.79
+      }
+    ],
+    "processing_metrics": {
+      "extraction_ms": 42,
+      "graph_update_ms": 3
+    }
+  },
+  "existing_entities_strengthened_edge": {
+    "schema_version": 1,
+    "timestamp": 1772201904528,
+    "article_id": "example-repeat",
+    "entity_changes": [
+      {
+        "id": "Alice",
+        "old_mentions": 10,
+        "new_mentions": 11,
+        "delta_mentions": 1,
+        "old_sentiment": 0.50,
+        "new_sentiment": 0.49,
+        "delta_sentiment": -0.01,
+        "old_centrality": 0.32,
+        "new_centrality": 0.32,
+        "delta_centrality": 0.00
+      }
+    ],
+    "relationship_changes": [
+      {
+        "source": "Alice",
+        "target": "Bob",
+        "old_strength": 3.40,
+        "new_strength": 3.58,
+        "delta_strength": 0.18,
+        "old_joint_sentiment": 0.46,
+        "new_joint_sentiment": 0.47,
+        "delta_joint_sentiment": 0.01
+      }
+    ],
+    "processing_metrics": {
+      "extraction_ms": 40,
+      "graph_update_ms": 2
+    }
+  }
+}

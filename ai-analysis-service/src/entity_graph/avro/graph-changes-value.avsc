@@ -3,11 +3,11 @@
   "name": "GraphChangeEventValue",
   "namespace": "com.election.sentiment",
   "fields": [
+    {"name": "schema_version", "type": "int", "default": 1},
     {
       "name": "timestamp",
       "type": {"type": "long", "logicalType": "timestamp-millis"}
     },
-    {"name": "event_id", "type": "string"},
     {"name": "article_id", "type": "string"},
     {
       "name": "entity_changes",
@@ -15,13 +15,18 @@
         "type": "array",
         "items": {
           "type": "record",
-          "name": "EntityChangeValue",
+          "name": "EntityDeltaValue",
           "fields": [
-            {"name": "entity", "type": "string"},
-            {"name": "type", "type": "string"},
+            {"name": "id", "type": "string"},
+            {"name": "old_mentions", "type": "int"},
+            {"name": "new_mentions", "type": "int"},
+            {"name": "delta_mentions", "type": "int"},
+            {"name": "old_sentiment", "type": "double"},
+            {"name": "new_sentiment", "type": "double"},
             {"name": "delta_sentiment", "type": "double"},
-            {"name": "mention_delta", "type": "int"},
-            {"name": "change_type", "type": "string"}
+            {"name": "old_centrality", "type": "double"},
+            {"name": "new_centrality", "type": "double"},
+            {"name": "delta_centrality", "type": "double"}
           ]
         }
       },
@@ -33,17 +38,31 @@
         "type": "array",
         "items": {
           "type": "record",
-          "name": "RelationshipChangeValue",
+          "name": "RelationshipDeltaValue",
           "fields": [
-            {"name": "source_entity", "type": "string"},
-            {"name": "target_entity", "type": "string"},
-            {"name": "delta_weight", "type": "double"},
-            {"name": "co_occurrence_delta", "type": "int"},
-            {"name": "change_type", "type": "string"}
+            {"name": "source", "type": "string"},
+            {"name": "target", "type": "string"},
+            {"name": "old_strength", "type": "double"},
+            {"name": "new_strength", "type": "double"},
+            {"name": "delta_strength", "type": "double"},
+            {"name": "old_joint_sentiment", "type": "double"},
+            {"name": "new_joint_sentiment", "type": "double"},
+            {"name": "delta_joint_sentiment", "type": "double"}
           ]
         }
       },
       "default": []
+    },
+    {
+      "name": "processing_metrics",
+      "type": {
+        "type": "record",
+        "name": "ChangeProcessingMetricsValue",
+        "fields": [
+          {"name": "extraction_ms", "type": "int"},
+          {"name": "graph_update_ms", "type": "int"}
+        ]
+      }
     }
   ]
 }

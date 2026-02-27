@@ -1,6 +1,6 @@
 #!/bin/bash
 # Master shutdown script for Election Sentiment Analysis System
-# Stops: Kafka Producer, Ingestion API, Redpanda, and TT-RSS
+# Stops: Storage Service, Kafka Producer, Ingestion API, Redpanda, Graph Storage PostgreSQL, and TT-RSS
 
 set -e
 
@@ -25,7 +25,24 @@ log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
-# Step 1: Stop Kafka Producer
+stop_pid_service() {
+    local name="$1"
+    local pidfile="$2"
+    if [ -f "$pidfile" ]; then
+        local pid
+        pid=$(cat "$pidfile")
+        log_info "Stopping ${name} (PID: ${pid})..."
+        kill "$pid" 2>/dev/null || log_warn "${name} already stopped"
+        rm -f "$pidfile"
+    else
+        log_warn "${name} PID file not found"
+    fi
+}
+
+# Step 1: Stop Storage Service
+stop_pid_service "Storage Service" "pids/storage-service.pid"
+
+# Step 2: Stop Kafka Producer
 if [ -f "pids/producer.pid" ]; then
     PRODUCER_PID=$(cat pids/producer.pid)
     log_info "Stopping Kafka Producer (PID: $PRODUCER_PID)..."
@@ -35,7 +52,7 @@ else
     log_warn "Producer PID file not found"
 fi
 
-# Step 2: Stop Ingestion API
+# Step 3: Stop Ingestion API
 if [ -f "pids/api.pid" ]; then
     API_PID=$(cat pids/api.pid)
     log_info "Stopping Ingestion API (PID: $API_PID)..."
@@ -45,13 +62,19 @@ else
     log_warn "API PID file not found"
 fi
 
-# Step 3: Stop Redpanda
+# Step 4: Stop Redpanda
 log_info "Stopping Redpanda..."
 cd redpanda
 docker-compose down
 cd ..
 
-# Step 4: Stop TT-RSS
+# Step 5: Stop Graph Storage PostgreSQL
+log_info "Stopping Graph Storage PostgreSQL..."
+cd ai-analysis-service/deploy/storage-postgres
+docker compose down
+cd ../../..
+
+# Step 6: Stop TT-RSS
 log_info "Stopping TT-RSS..."
 cd ttrss
 docker-compose down

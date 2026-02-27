@@ -1,0 +1,21 @@
+services:
+  graph-storage-postgres:
+    image: postgres:16
+    container_name: graph-storage-postgres
+    environment:
+      POSTGRES_DB: graph_storage
+      POSTGRES_USER: graph_user
+      POSTGRES_PASSWORD: graph_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - graph-storage-pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graph_user -d graph_storage"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  graph-storage-pgdata:
