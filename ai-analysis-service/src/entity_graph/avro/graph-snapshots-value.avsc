@@ -1,0 +1,46 @@
+{
+  "type": "record",
+  "name": "GraphSnapshotValue",
+  "namespace": "com.election.sentiment",
+  "fields": [
+    {
+      "name": "timestamp",
+      "type": {"type": "long", "logicalType": "timestamp-millis"}
+    },
+    {"name": "last_event_id", "type": "string"},
+    {
+      "name": "nodes",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "GraphNodeValue",
+          "fields": [
+            {"name": "entity", "type": "string"},
+            {"name": "type", "type": "string"},
+            {"name": "sentiment_avg", "type": "double"},
+            {"name": "mention_count", "type": "long"},
+            {"name": "last_seen_at", "type": {"type": "long", "logicalType": "timestamp-millis"}}
+          ]
+        }
+      }
+    },
+    {
+      "name": "edges",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "GraphEdgeValue",
+          "fields": [
+            {"name": "source_entity", "type": "string"},
+            {"name": "target_entity", "type": "string"},
+            {"name": "weight", "type": "double"},
+            {"name": "co_occurrence_count", "type": "long"},
+            {"name": "last_updated_at", "type": {"type": "long", "logicalType": "timestamp-millis"}}
+          ]
+        }
+      }
+    }
+  ]
+}

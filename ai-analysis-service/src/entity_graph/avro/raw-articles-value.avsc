@@ -1,0 +1,22 @@
+{
+  "type": "record",
+  "name": "RawArticleValue",
+  "namespace": "com.election.sentiment",
+  "fields": [
+    {"name": "id", "type": "string"},
+    {"name": "source_url", "type": "string"},
+    {"name": "content", "type": "string"},
+    {
+      "name": "published_at",
+      "type": {"type": "long", "logicalType": "timestamp-millis"}
+    },
+    {
+      "name": "raw_metadata",
+      "type": {
+        "type": "map",
+        "values": ["null", "string", "long", "double", "boolean"]
+      },
+      "default": {}
+    }
+  ]
+}

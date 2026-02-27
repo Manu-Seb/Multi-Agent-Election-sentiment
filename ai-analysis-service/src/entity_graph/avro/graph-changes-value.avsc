@@ -1,0 +1,49 @@
+{
+  "type": "record",
+  "name": "GraphChangeEventValue",
+  "namespace": "com.election.sentiment",
+  "fields": [
+    {
+      "name": "timestamp",
+      "type": {"type": "long", "logicalType": "timestamp-millis"}
+    },
+    {"name": "event_id", "type": "string"},
+    {"name": "article_id", "type": "string"},
+    {
+      "name": "entity_changes",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "EntityChangeValue",
+          "fields": [
+            {"name": "entity", "type": "string"},
+            {"name": "type", "type": "string"},
+            {"name": "delta_sentiment", "type": "double"},
+            {"name": "mention_delta", "type": "int"},
+            {"name": "change_type", "type": "string"}
+          ]
+        }
+      },
+      "default": []
+    },
+    {
+      "name": "relationship_changes",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "RelationshipChangeValue",
+          "fields": [
+            {"name": "source_entity", "type": "string"},
+            {"name": "target_entity", "type": "string"},
+            {"name": "delta_weight", "type": "double"},
+            {"name": "co_occurrence_delta", "type": "int"},
+            {"name": "change_type", "type": "string"}
+          ]
+        }
+      },
+      "default": []
+    }
+  ]
+}

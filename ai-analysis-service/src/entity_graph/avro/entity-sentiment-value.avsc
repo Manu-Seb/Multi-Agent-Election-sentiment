@@ -1,0 +1,58 @@
+{
+  "type": "record",
+  "name": "EntitySentimentValue",
+  "namespace": "com.election.sentiment",
+  "fields": [
+    {"name": "article_id", "type": "string"},
+    {
+      "name": "processed_at",
+      "type": {"type": "long", "logicalType": "timestamp-millis"}
+    },
+    {
+      "name": "entities",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "EntityMentionValue",
+          "fields": [
+            {"name": "text", "type": "string"},
+            {"name": "type", "type": "string"},
+            {"name": "sentence", "type": "string"},
+            {"name": "sentiment_score", "type": "double"},
+            {"name": "confidence", "type": "double"},
+            {"name": "char_start", "type": "int"},
+            {"name": "char_end", "type": "int"}
+          ]
+        }
+      }
+    },
+    {
+      "name": "co_occurrence_pairs",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "CoOccurrencePairValue",
+          "fields": [
+            {"name": "entity_1", "type": "string"},
+            {"name": "entity_2", "type": "string"},
+            {"name": "count", "type": "int"}
+          ]
+        }
+      },
+      "default": []
+    },
+    {
+      "name": "processing_metadata",
+      "type": {
+        "type": "record",
+        "name": "ProcessingMetadataValue",
+        "fields": [
+          {"name": "processing_time_ms", "type": "long"},
+          {"name": "model_versions", "type": {"type": "map", "values": "string"}, "default": {}}
+        ]
+      }
+    }
+  ]
+}
