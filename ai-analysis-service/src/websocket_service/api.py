@@ -34,10 +34,31 @@ consumer: KafkaChangeConsumer | None = None
 redis_sync = RedisBroadcaster(cfg.redis_enabled, cfg.redis_url, cfg.redis_channel)
 
 # SSE listeners
-sse_clients: dict[str, asyncio.Queue[str]] = {}
+sse_clients: dict[str, tuple[tuple[str, ...], asyncio.Queue[str]]] = {}
 
 # small buffer for debugging/recovery fallback
 recent_events: deque[dict[str, Any]] = deque(maxlen=5000)
+
+
+def _topic_terms(topic: str) -> tuple[str, ...]:
+    terms = []
+    for raw in topic.lower().split():
+        token = "".join(ch for ch in raw if ch.isalnum() or ch in "-_")
+        if len(token) >= 3:
+            terms.append(token)
+    return tuple(terms)
+
+
+def _event_matches_terms(events: list[dict[str, Any]], terms: tuple[str, ...]) -> bool:
+    if not terms:
+        return True
+    for event in events:
+        article_id = str(event.get("article_id", "")).lower()
+        entity_ids = " ".join(str(ch.get("id", "")) for ch in event.get("entity_changes", []))
+        haystack = f"{article_id} {entity_ids}".lower()
+        if any(term in haystack for term in terms):
+            return True
+    return False
 
 
 async def _enqueue_event(event: dict[str, Any]) -> None:
@@ -137,7 +158,9 @@ async def _broadcast_loop() -> None:
 
         # SSE push
         dead_sse = []
-        for client_id, q in sse_clients.items():
+        for client_id, (terms, q) in sse_clients.items():
+            if not _event_matches_terms(batch, terms):
+                continue
             try:
                 q.put_nowait(payload_json)
             except asyncio.QueueFull:
@@ -156,24 +179,31 @@ async def _auth_context(authorization: str | None = Header(default=None)) -> dic
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
+    topic: str | None = Query(default=None, description="required topic string for filtering"),
     token: str | None = Query(default=None),
     entities: str | None = Query(default=None, description="comma-separated entity ids"),
     last_event_id: int | None = Query(default=None),
 ):
     _ = validate_jwt_placeholder(token, required=cfg.auth_required)
+    if not topic or not topic.strip():
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "error": "No topic provided"})
+        await websocket.close(code=1008)
+        return
 
     subscription_set = set(x.strip() for x in (entities or "").split(",") if x.strip())
     client_id = str(uuid.uuid4())
-    state = await manager.connect(client_id, websocket, subscription_set)
+    topic_value = topic.strip()
+    state = await manager.connect(client_id, websocket, subscription_set, topic_filter=topic_value)
 
     try:
         # Initial full state
-        init_state = current_full_state(repo)
+        init_state = current_full_state(repo, topic=topic_value)
         await websocket.send_json({"type": "initial_state", "state": init_state})
 
         # Recovery by last event id
         if last_event_id is not None:
-            replay = replay_from_last_event(repo, last_event_id=last_event_id, limit=cfg.replay_limit)
+            replay = replay_from_last_event(repo, last_event_id=last_event_id, limit=cfg.replay_limit, topic=topic_value)
             await websocket.send_json({"type": "replay", "count": len(replay), "events": replay})
 
         while True:
@@ -204,17 +234,18 @@ async def websocket_endpoint(
 
 @app.get("/sse")
 async def sse_endpoint(
+    topic: str = Query(..., min_length=1),
     entities: str | None = Query(default=None),
     auth: dict = Depends(_auth_context),
 ):
     _ = auth
     client_id = f"sse-{uuid.uuid4()}"
     q: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
-    sse_clients[client_id] = q
+    sse_clients[client_id] = (_topic_terms(topic), q)
 
     async def event_stream():
         try:
-            init_state = current_full_state(repo)
+            init_state = current_full_state(repo, topic=topic)
             yield f"event: initial_state\\ndata: {json.dumps({'type':'initial_state','state':init_state})}\\n\\n"
             while True:
                 payload_json = await q.get()

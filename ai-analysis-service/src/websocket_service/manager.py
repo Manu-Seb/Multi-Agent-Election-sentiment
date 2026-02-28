@@ -17,6 +17,8 @@ class ClientState:
     websocket: WebSocket
     connected_at: float
     subscriptions: set[str] = field(default_factory=set)
+    topic_filter: str = ""
+    topic_terms: tuple[str, ...] = ()
     rooms: set[str] = field(default_factory=set)
     last_heartbeat: float = field(default_factory=time.time)
     sent_count: int = 0
@@ -32,10 +34,23 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
         self.rate_limit_per_sec = max(1, rate_limit_per_sec)
 
-    async def connect(self, client_id: str, websocket: WebSocket, subscriptions: set[str]) -> ClientState:
+    @staticmethod
+    def _topic_terms(topic_filter: str) -> tuple[str, ...]:
+        terms = []
+        for raw in topic_filter.lower().split():
+            token = "".join(ch for ch in raw if ch.isalnum() or ch in "-_")
+            if len(token) >= 3:
+                terms.append(token)
+        return tuple(terms)
+
+    async def connect(
+        self, client_id: str, websocket: WebSocket, subscriptions: set[str], topic_filter: str
+    ) -> ClientState:
         await websocket.accept()
         state = ClientState(client_id=client_id, websocket=websocket, connected_at=time.time())
         state.subscriptions = set(subscriptions)
+        state.topic_filter = topic_filter.strip()
+        state.topic_terms = self._topic_terms(topic_filter)
 
         async with self._lock:
             self._clients[client_id] = state
@@ -90,6 +105,18 @@ class ConnectionManager:
         return True
 
     @staticmethod
+    def _event_matches_topic(state: ClientState, events: list[dict[str, Any]]) -> bool:
+        if not state.topic_terms:
+            return True
+        for event in events:
+            article_id = str(event.get("article_id", "")).lower()
+            entity_text = " ".join(str(ch.get("id", "")) for ch in event.get("entity_changes", []))
+            haystack = f"{article_id} {entity_text}".lower()
+            if any(term in haystack for term in state.topic_terms):
+                return True
+        return False
+
+    @staticmethod
     def _event_matches_subscriptions(state: ClientState, events: list[dict[str, Any]]) -> bool:
         if not state.subscriptions:
             return True
@@ -106,6 +133,8 @@ class ConnectionManager:
         sent = 0
         dropped = 0
         for state in clients:
+            if not self._event_matches_topic(state, events):
+                continue
             if not self._event_matches_subscriptions(state, events):
                 continue
             if not self._passes_rate_limit(state, self.rate_limit_per_sec):

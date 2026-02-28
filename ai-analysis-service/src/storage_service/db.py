@@ -157,5 +157,23 @@ class StorageRepository:
         )
         return [dict(row) for row in rows or []]
 
+    def fetch_recent_articles(self, topic: str, limit: int = 50) -> list[dict[str, Any]]:
+        terms = [t.strip().lower() for t in topic.split() if len(t.strip()) >= 3]
+        sql = """
+            SELECT id, event_time, article_id, changes
+            FROM graph_change_events
+        """
+        params: list[Any] = []
+        if terms:
+            clauses = []
+            for term in terms:
+                clauses.append("changes::text ILIKE %s")
+                params.append(f"%{term}%")
+            sql += f" WHERE ({' OR '.join(clauses)})"
+        sql += " ORDER BY id DESC LIMIT %s"
+        params.append(limit)
+        rows = retry(lambda: self._run(sql, tuple(params), fetch="all"))
+        return [dict(row) for row in rows or []]
+
     def close(self) -> None:
         self._pool.closeall()

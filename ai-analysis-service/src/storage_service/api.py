@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -28,6 +29,13 @@ consumer = StorageConsumerWorker(cfg, repo, snapshot_mgr)
 cache = ReconstructionCache(cfg.reconstruction_cache_ttl_seconds, cfg.reconstruction_cache_size)
 
 app = FastAPI(title="Graph Storage Service")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
@@ -52,10 +60,10 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/state")
-def get_state(time: str = Query(..., description="ISO-8601 timestamp")) -> dict[str, Any]:
+def get_state(at: str = Query(..., alias="time", description="ISO-8601 timestamp")) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        at_time = parse_iso_time(time)
+        at_time = parse_iso_time(at)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -136,3 +144,33 @@ def sentiment_trend(
         "interval": interval,
         "points": trend,
     }
+
+
+@app.get("/articles/recent")
+def recent_articles(topic: str = Query(..., min_length=1), limit: int = Query(50, ge=1, le=200)) -> dict[str, Any]:
+    started = time.perf_counter()
+    rows = repo.fetch_recent_articles(topic=topic, limit=limit)
+    items = []
+    for row in rows:
+        change = row["changes"] or {}
+        entities = []
+        for ent in change.get("entity_changes", []):
+            entities.append(
+                {
+                    "id": ent.get("id"),
+                    "type": ent.get("type", "UNKNOWN"),
+                    "sentiment": ent.get("new_sentiment"),
+                    "delta_mentions": ent.get("delta_mentions", 0),
+                }
+            )
+        items.append(
+            {
+                "event_id": row["id"],
+                "event_time": row["event_time"].isoformat() if row.get("event_time") else None,
+                "article_id": row.get("article_id"),
+                "headline": change.get("headline") or row.get("article_id"),
+                "entities": entities,
+            }
+        )
+    QUERY_LATENCY_SECONDS.observe(time.perf_counter() - started)
+    return {"topic": topic, "count": len(items), "items": items}

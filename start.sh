@@ -153,6 +153,16 @@ set -a
 source "$PROJECT_ROOT/ingestion-service/.env"
 set +a
 
+# Optional AI analysis env vars
+if [ -f "$PROJECT_ROOT/ai-analysis-service/.env" ]; then
+  log_info "Loading ai-analysis-service/.env"
+  set -a
+  source "$PROJECT_ROOT/ai-analysis-service/.env"
+  set +a
+else
+  log_warn "ai-analysis-service/.env not found; using built-in defaults for AI services."
+fi
+
 # 1) Infra stacks (folder parity)
 compose_up "$PROJECT_ROOT/redpanda"
 compose_up "$PROJECT_ROOT/ttrss"
@@ -210,31 +220,31 @@ AI_PYTHONPATH="$PROJECT_ROOT/ai-analysis-service/src"
 
 start_python_service \
   "Entity Sentiment Processor" \
-  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='localhost:9092' RAW_ARTICLES_TOPIC='raw_ingestion' ENTITY_SENTIMENT_TOPIC='entity-sentiment' ENTITY_SENTIMENT_DLQ_TOPIC='entity-sentiment-dlq' KAFKA_GROUP_ID='entity-sentiment-processor' HF_HUB_DISABLE_PROGRESS_BARS='1' TRANSFORMERS_VERBOSITY='error' '$AI_PY' ai-analysis-service/src/main.py" \
+  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}' RAW_ARTICLES_TOPIC='${RAW_ARTICLES_TOPIC:-raw_ingestion}' ENTITY_SENTIMENT_TOPIC='${ENTITY_SENTIMENT_TOPIC:-entity-sentiment}' ENTITY_SENTIMENT_DLQ_TOPIC='${ENTITY_SENTIMENT_DLQ_TOPIC:-entity-sentiment-dlq}' KAFKA_GROUP_ID='${KAFKA_GROUP_ID:-entity-sentiment-processor}' HF_HUB_DISABLE_PROGRESS_BARS='${HF_HUB_DISABLE_PROGRESS_BARS:-1}' TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY:-error}' '$AI_PY' ai-analysis-service/src/main.py" \
   "$LOG_DIR/entity-sentiment-processor.log" \
   "$PID_DIR/entity-sentiment-processor.pid"
 
 start_python_service \
   "Graph State Service" \
-  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='localhost:9092' GRAPH_STREAM_ENABLED='true' ENTITY_SENTIMENT_TOPIC='entity-sentiment' GRAPH_CHANGES_TOPIC='graph-changes' '$AI_UVICORN' graph_state.api:app --host 0.0.0.0 --port 8010" \
+  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}' GRAPH_STREAM_ENABLED='${GRAPH_STREAM_ENABLED:-true}' ENTITY_SENTIMENT_TOPIC='${ENTITY_SENTIMENT_TOPIC:-entity-sentiment}' GRAPH_CHANGES_TOPIC='${GRAPH_CHANGES_TOPIC:-graph-changes}' GRAPH_STATE_GROUP_ID='${GRAPH_STATE_GROUP_ID:-graph-state-rebuild-$(date +%s)}' KAFKA_AUTO_OFFSET_RESET='${GRAPH_STATE_AUTO_OFFSET_RESET:-earliest}' '$AI_UVICORN' graph_state.api:app --host 0.0.0.0 --port 8010" \
   "$LOG_DIR/graph-state.log" \
   "$PID_DIR/graph-state.pid"
 
 start_python_service \
   "Graph Algorithms Service" \
-  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='localhost:9092' ENTITY_SENTIMENT_TOPIC='entity-sentiment' GRAPH_METRICS_TOPIC='graph-metrics' GRAPH_ALGO_GROUP_ID='graph-algorithms-service' '$AI_PY' -m graph_algorithms.main" \
+  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}' ENTITY_SENTIMENT_TOPIC='${ENTITY_SENTIMENT_TOPIC:-entity-sentiment}' GRAPH_METRICS_TOPIC='${GRAPH_METRICS_TOPIC:-graph-metrics}' GRAPH_ALGO_GROUP_ID='${GRAPH_ALGO_GROUP_ID:-graph-algorithms-service}' '$AI_PY' -m graph_algorithms.main" \
   "$LOG_DIR/graph-algorithms.log" \
   "$PID_DIR/graph-algorithms.pid"
 
 start_python_service \
   "Storage Service" \
-  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='localhost:9092' GRAPH_STORAGE_POSTGRES_DSN='postgresql://graph_user:graph_pass@localhost:5433/graph_storage' GRAPH_STORAGE_GROUP_ID='graph-storage' GRAPH_CHANGES_TOPIC='graph-changes' GRAPH_SNAPSHOTS_TOPIC='graph-snapshots' GRAPH_STORAGE_INSTANCE_ID='storage-1' '$AI_UVICORN' storage_service.api:app --host 0.0.0.0 --port 8020" \
+  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}' GRAPH_STORAGE_POSTGRES_DSN='${GRAPH_STORAGE_POSTGRES_DSN:-postgresql://graph_user:graph_pass@localhost:5433/graph_storage}' GRAPH_STORAGE_GROUP_ID='${GRAPH_STORAGE_GROUP_ID:-graph-storage}' GRAPH_CHANGES_TOPIC='${GRAPH_CHANGES_TOPIC:-graph-changes}' GRAPH_SNAPSHOTS_TOPIC='${GRAPH_SNAPSHOTS_TOPIC:-graph-snapshots}' GRAPH_STORAGE_INSTANCE_ID='${GRAPH_STORAGE_INSTANCE_ID:-storage-1}' '$AI_UVICORN' storage_service.api:app --host 0.0.0.0 --port 8020" \
   "$LOG_DIR/storage-service.log" \
   "$PID_DIR/storage-service.pid"
 
 start_python_service \
   "WebSocket Broadcast Service" \
-  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='localhost:9092' WEBSOCKET_GROUP_ID='websocket-broadcaster' GRAPH_CHANGES_TOPIC='graph-changes' GRAPH_STORAGE_POSTGRES_DSN='postgresql://graph_user:graph_pass@localhost:5433/graph_storage' WS_REDIS_ENABLED='false' WS_REDIS_URL='redis://localhost:6379/0' WS_INSTANCE_ID='ws-1' '$AI_UVICORN' websocket_service.api:app --host 0.0.0.0 --port 8030" \
+  "cd '$PROJECT_ROOT' && PYTHONPATH='$AI_PYTHONPATH' KAFKA_BOOTSTRAP_SERVERS='${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}' WEBSOCKET_GROUP_ID='${WEBSOCKET_GROUP_ID:-websocket-broadcaster}' GRAPH_CHANGES_TOPIC='${GRAPH_CHANGES_TOPIC:-graph-changes}' GRAPH_STORAGE_POSTGRES_DSN='${GRAPH_STORAGE_POSTGRES_DSN:-postgresql://graph_user:graph_pass@localhost:5433/graph_storage}' WS_REDIS_ENABLED='${WS_REDIS_ENABLED:-false}' WS_REDIS_URL='${WS_REDIS_URL:-redis://localhost:6379/0}' WS_INSTANCE_ID='${WS_INSTANCE_ID:-ws-1}' '$AI_UVICORN' websocket_service.api:app --host 0.0.0.0 --port 8030" \
   "$LOG_DIR/websocket-service.log" \
   "$PID_DIR/websocket-service.pid"
 

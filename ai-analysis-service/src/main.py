@@ -25,15 +25,24 @@ class RuntimeConfig:
     batch_size: int
     poll_timeout_seconds: float
     metrics_interval_seconds: float
+    headline_filter_terms: tuple[str, ...]
 
 
 def load_config() -> RuntimeConfig:
     import os
 
+    raw_terms = os.getenv("PROCESSOR_HEADLINE_FILTER_TERMS", "")
+    terms = tuple(
+        token.strip().lower()
+        for token in raw_terms.split(",")
+        if token.strip()
+    )
+
     return RuntimeConfig(
         batch_size=int(os.getenv("PROCESSOR_BATCH_SIZE", "25")),
         poll_timeout_seconds=float(os.getenv("PROCESSOR_POLL_TIMEOUT_SECONDS", "1.0")),
         metrics_interval_seconds=float(os.getenv("PROCESSOR_METRICS_INTERVAL_SECONDS", "10.0")),
+        headline_filter_terms=terms,
     )
 
 
@@ -43,6 +52,7 @@ class MetricsTracker:
         self.window_start = time.time()
         self.processed_ok = 0
         self.failed = 0
+        self.skipped = 0
         self.total_latency_ms = 0.0
 
     def record_success(self, latency_ms: float) -> None:
@@ -51,6 +61,9 @@ class MetricsTracker:
 
     def record_failure(self) -> None:
         self.failed += 1
+
+    def record_skipped(self) -> None:
+        self.skipped += 1
 
     def maybe_emit(self, logger: logging.Logger) -> None:
         now = time.time()
@@ -61,17 +74,19 @@ class MetricsTracker:
         articles_per_second = self.processed_ok / elapsed if elapsed > 0 else 0.0
         avg_latency = self.total_latency_ms / self.processed_ok if self.processed_ok > 0 else 0.0
         logger.info(
-            "metrics articles_per_second=%.3f avg_latency_ms=%.2f success=%d failures=%d window_sec=%.2f",
+            "metrics articles_per_second=%.3f avg_latency_ms=%.2f success=%d failures=%d skipped=%d window_sec=%.2f",
             articles_per_second,
             avg_latency,
             self.processed_ok,
             self.failed,
+            self.skipped,
             elapsed,
         )
 
         self.window_start = now
         self.processed_ok = 0
         self.failed = 0
+        self.skipped = 0
         self.total_latency_ms = 0.0
 
 
@@ -86,6 +101,13 @@ class EntitySentimentStreamApp:
         self.consumer = RawArticlesConsumer()
         self.producer = EntitySentimentProducer()
         self.metrics = MetricsTracker(self.config.metrics_interval_seconds)
+        if self.config.headline_filter_terms:
+            self.logger.info(
+                "headline filter enabled terms=%s",
+                ",".join(self.config.headline_filter_terms),
+            )
+        else:
+            self.logger.info("headline filter disabled; all articles will be analyzed")
 
     def _shutdown_handler(self, signum: int, _frame: Any) -> None:
         self.logger.info("received signal=%d; shutting down", signum)
@@ -195,6 +217,12 @@ class EntitySentimentStreamApp:
             }
             return ArticleValue.model_validate(normalized)
 
+    def _headline_accepted(self, article: ArticleValue) -> bool:
+        if not self.config.headline_filter_terms:
+            return True
+        title = str(article.raw_metadata.get("title", "")).lower()
+        return any(term in title for term in self.config.headline_filter_terms)
+
     def _publish_dlq(self, message: Message, error: Exception) -> None:
         article_id = self._safe_article_id(message)
         self.logger.exception(
@@ -239,6 +267,9 @@ class EntitySentimentStreamApp:
                     for message in batch:
                         try:
                             article = self._parse_article_value(message)
+                            if not self._headline_accepted(article):
+                                self.metrics.record_skipped()
+                                continue
                             result_payload = self._process_article(article)
                             self.producer.publish_result(
                                 key=result_payload.article_id,

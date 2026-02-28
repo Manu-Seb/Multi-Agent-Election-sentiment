@@ -26,6 +26,23 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+coverage/
+*.tsbuildinfo
+
+# Node.js / JavaScript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
+.yarn/
+.cache/
+.next/
+.nuxt/
+.svelte-kit/
+out/
 
 # Logs
 *.log
