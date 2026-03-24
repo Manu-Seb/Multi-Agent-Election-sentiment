@@ -5,6 +5,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from statistics import mean
 from typing import Any, Iterator
@@ -14,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 GRAPH_STATE_API_URL = "http://localhost:8010"
+INGESTION_API_URL = "http://localhost:8000"
 REDPANDA_CONTAINER = "redpanda"
 RAW_INGESTION_TOPIC = "raw_ingestion"
 ENTITY_SENTIMENT_TOPIC = "entity-sentiment"
@@ -57,6 +59,13 @@ def http_get_json(url: str) -> Any:
     with urllib.request.urlopen(req, timeout=20) as resp:
         body = resp.read().decode("utf-8")
         return json.loads(body)
+
+
+def http_post_json(url: str, payload: dict[str, Any]) -> Any:
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url=url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 class TopicIndex:
@@ -171,6 +180,24 @@ def stream(topic: str = Query(..., min_length=1)) -> StreamingResponse:
         graph_index.start()
 
         yield sse_payload({"type": "status", "message": f"Watching topic '{topic}' from raw ingestion at {now_iso()}"})
+        try:
+            priority_response = http_post_json(
+                f"{INGESTION_API_URL.rstrip('/')}/api/v1/bluesky/priority-topic",
+                {"topic": topic},
+            )
+            yield sse_payload(
+                {
+                    "type": "status",
+                    "message": f"Registered Bluesky priority topic '{topic}'. Active topics: {', '.join(priority_response.get('active_topics', []))}",
+                }
+            )
+        except urllib.error.URLError as exc:
+            yield sse_payload(
+                {
+                    "type": "status",
+                    "message": f"Could not register Bluesky priority topic '{topic}': {exc}",
+                }
+            )
         # Keep-alive so proxies/browsers don't close idle SSE connections.
         yield ": keep-alive\n\n"
 

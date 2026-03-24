@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 import asyncio
 import logging
 
+from pydantic import BaseModel, Field
+
+from bluesky_priority import register_priority_topic
 from config import settings
 from schemas import Article
 from services.ttrss import TTRSSClient
@@ -19,6 +22,17 @@ app = FastAPI(title="TT-RSS Ingestion Service")
 # For simplicity, using a global instance since it holds the session state.
 # In a rigorous dependency injection setup, we might manage this differently.
 ttrss_client = TTRSSClient()
+
+
+class BlueskyPriorityRequest(BaseModel):
+    topic: str = Field(..., min_length=1, max_length=120)
+
+
+class BlueskyPriorityResponse(BaseModel):
+    topic: str
+    requested_at: str
+    active_topics: List[str]
+    ttl_seconds: int
 
 @app.get("/api/v1/articles", response_model=List[Article])
 async def get_articles(
@@ -76,6 +90,18 @@ async def get_articles(
     except Exception as e:
         logger.error(f"Error processing request: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/bluesky/priority-topic", response_model=BlueskyPriorityResponse)
+def add_bluesky_priority_topic(payload: BlueskyPriorityRequest):
+    try:
+        result = register_priority_topic(payload.topic)
+        return BlueskyPriorityResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Failed to register Bluesky priority topic: %s", exc)
+        raise HTTPException(status_code=500, detail="failed to register priority topic") from exc
 
 @app.get("/health")
 def health_check():

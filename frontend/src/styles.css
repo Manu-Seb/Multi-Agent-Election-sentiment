@@ -137,6 +137,37 @@ button.secondary {
   color: var(--muted);
 }
 
+.article-badges {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.source-badge.rss {
+  color: #134f8a;
+  background: #eef6ff;
+  border-color: #b5d2f0;
+}
+
+.source-badge.social {
+  color: #7f3b00;
+  background: #fff4e8;
+  border-color: #efca9e;
+}
+
 .preview {
   margin: 8px 0;
   font-size: 13px;

@@ -116,3 +116,18 @@ def test_get_articles_no_query(mock_get_headlines):
     assert len(data) == 2
     assert data[0]["tags"] == []
 
+
+@patch("main.register_priority_topic")
+def test_add_bluesky_priority_topic(mock_register_priority_topic):
+    mock_register_priority_topic.return_value = {
+        "topic": "trump",
+        "requested_at": "2026-03-22T14:00:00Z",
+        "active_topics": ["trump", "election"],
+        "ttl_seconds": 1800,
+    }
+
+    response = client.post("/api/v1/bluesky/priority-topic", json={"topic": "Trump"})
+
+    assert response.status_code == 200
+    assert response.json()["topic"] == "trump"
+    assert response.json()["active_topics"] == ["trump", "election"]

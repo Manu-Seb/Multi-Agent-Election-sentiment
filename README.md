@@ -19,7 +19,7 @@ Kafka Producer → Redpanda (Event Bus)
 1. **TT-RSS** - RSS feed aggregator and reader (Port 181)
 2. **Redpanda** - Kafka-compatible event streaming platform (Port 9092)
 3. **Ingestion API** - FastAPI service for querying articles (Port 8000)
-4. **Kafka Producer** - Polls TT-RSS and publishes to Redpanda
+4. **Kafka Producer** - Polls TT-RSS plus optional Bluesky searches and publishes to Redpanda
 
 ## Quick Start
 
@@ -104,6 +104,22 @@ uvicorn main:app --reload
 source venv/bin/activate
 python ingestion-service/producer.py
 ```
+
+### Bluesky ingestion
+
+Add these to `ingestion-service/.env` if you want Bluesky posts ingested into `raw_ingestion` alongside TT-RSS:
+
+```bash
+BLUESKY_ENABLED=true
+BLUESKY_USERNAME=your-handle.bsky.social
+BLUESKY_PASSWORD=your-app-password
+BLUESKY_SEARCH_TERMS=election,trump
+BLUESKY_PRIORITY_TTL_SECONDS=1800
+BLUESKY_PRIORITY_MAX_TOPICS=10
+```
+
+Each Bluesky record is published with `source="bluesky"` and tags like `["social media", "election"]`.
+When a user starts tracking a topic in the frontend, that topic is registered as a temporary priority term for the ingestion worker, which searches priority topics before the default env terms.
 
 ## Project Structure
 

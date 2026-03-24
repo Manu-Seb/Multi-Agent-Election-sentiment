@@ -11,7 +11,16 @@ function prettify(data) {
   return JSON.stringify(data, null, 2)
 }
 
+function sourceTypeLabel(article) {
+  const source = String(article.source || '').toLowerCase()
+  if (source.includes('bluesky')) return 'Social Media'
+  return 'RSS Feed'
+}
+
 function ArticleCard({ article }) {
+  const sourceType = sourceTypeLabel(article)
+  const sourceBadgeClass = sourceType === 'Social Media' ? 'source-badge social' : 'source-badge rss'
+
   return (
     <article className="article-card">
       <header className="article-header">
@@ -20,6 +29,9 @@ function ArticleCard({ article }) {
           <p className="article-meta">
             id={article.id} · {article.published_at || 'unknown time'} · {article.accepted ? 'accepted' : 'rejected'}
           </p>
+          <div className="article-badges">
+            <span className={sourceBadgeClass}>{sourceType}</span>
+          </div>
         </div>
         <span className={article.accepted ? 'pill ok' : 'pill skip'}>
           {article.accepted ? 'Accepted' : 'Rejected'}
@@ -169,6 +181,7 @@ export default function App() {
         next.title = data.title || next.title
         next.published_at = data.published_at || next.published_at
         next.preview = data.article_preview || next.preview
+        next.source = data.source || next.source
         next.step1 = data
       }
       if (data.type === 'step2') next.step2 = data
